@@ -1,0 +1,338 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+# DATABASE
+
+Construction & exploitation de la base de données
+
+
+## library nécéssaires par la suite 
+
+```{r}
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(ggthemes)
+library(leaflet)
+library(assertthat)
+library(utils)
+
+
+getwd()
+
+```
+
+
+## construction full_base : juste un join de nos bases 
+
+```{r}
+stop_times <- read.csv("DATA/RATP_GTFS_FULL/stop_times.txt")
+
+View(stop_times)
+
+routes <- read.csv("DATA/RATP_GTFS_FULL/routes.txt")
+
+stops <- read.csv("DATA/RATP_GTFS_FULL/stops.txt")
+
+trips <- read.csv("DATA/RATP_GTFS_FULL/trips.txt")
+
+transfers <- read.csv("DATA/RATP_GTFS_FULL/transfers.txt")
+
+
+full_base <- stops %>% 
+  full_join( stop_times, id = "stop_id") %>%
+  full_join( trips, id = "trip_id") %>%
+  full_join( routes, id = "route_id")
+
+#View(full_base)
+
+
+```
+
+
+## fonction save_as_csv : pour sauvegarder cette base 
+
+```{r eval=FALSE}
+library(assertthat)
+library(utils)
+
+save_as_csv <- function(dataset, filename, row.names = FALSE, ...){
+  assert_that(has_extension(filename,"csv"))
+  assert_that(is.dir(dirname(filename)))
+  assert_that(is.writeable(dirname(filename)))
+  assert_that(not_empty(dataset))
+  assert_that(is.data.frame(dataset))
+
+  write.csv2( x = dataset, file  = filename, row.names = row.names, ...)
+
+  invisible(normalizePath(filename))
+
+}
+
+save_as_csv(full_base, "full_base.csv")
+
+save_as_csv(base_trajet_total,"base_trajet_total.csv")
+
+```
+
+
+## construction base_metro : on ne garde que le RER et le métro (suppression des lignes qui concernent le bus, tram... )
+
+```{r eval= FALSE}
+base_metro <-full_base %>%
+  filter( route_type == 1 | route_type == 2) %>%
+  subset(select = -c(agency_id, route_text_color, route_desc, route_url,route_color, route_text_color, shape_id, stop_headsign, shape_dist_traveled, stop_code, parent_station))
+
+View(base_metro)
+
+save_as_csv(base_metro, "base_metro.csv")
+
+
+```
+
+
+## Construction de la base métro map : garde une station par ligne (plus 50000 lignes pour tous les départs de Villepinte, mais une seule). En revanche, charles de gaulle étoile: 4 fois, pour le rer A, la 1, la 2 et la 6 
+
+```{r}
+#base_metro_map <- base_metro %>%
+  #distinct(stop_name, route_short_name, .keep_all = TRUE)
+#View(base_metro_map)
+```
+
+
+# base simplifiée en séquences par lignes (viz Amélie + tableau distances)
+
+```{r}
+
+base_trajet_seq <- base_metro %>%
+  distinct(stop_name, route_id, .keep_all = TRUE)%>%
+  #filter(direction_id == 0) %>%
+  arrange(route_id, trip_headsign, direction_id, stop_sequence)
+
+```
+
+## corrections au cas par cas
+
+RER B : on ne garde que les lignes KOCQ et SOIR . Fais les trajets KOCQ : Aeroport ==> Massy Pal, SOIR ==> Mitry Claye ==> Robinson. Nous avons toutes les stations jusqu'à massy palaiseau, ordonnées. mais en double sur la branche principale
+
+
+```{r}
+base_trajet_rerb <- base_trajet_seq %>% 
+  filter (route_short_name =="B", trip_headsign =="KOCQ" | trip_headsign =="SOIR")
+
+```
+
+RER A : NELY ==> Saint Germain Boissy Saint Léger, Cergy le Haut ==> Marne la Vallée 
+
+```{r}
+base_trajet_rera <-base_trajet_seq %>% 
+  filter (route_short_name=="A", trip_headsign== "NELY" | trip_headsign =="QIKY")
+
+```
+
+Metro 7 : supprimer 4 stations qui apparaissent en double
+
+```{r}
+base_trajet_7 <- base_trajet_seq %>% 
+  filter (route_short_name == 7, stop_id != 2505, stop_id != 2506, stop_id != 2519, stop_id != 2250)
+
+```
+
+Metro 7B : problème avec la boucle
+
+```{r}
+trajet7B_0 <-base_trajet_seq %>% filter(route_short_name == '7B', direction_id == 0, stop_id != 1797 )
+trajet7B_1 <-base_trajet_seq %>% filter(route_short_name == '7B', direction_id == 1, stop_id != 1635 )
+
+trajet7B_12 <- trajet7B_1 %>% filter (stop_id== 1797) %>% mutate(stop_sequence =2, departure_time = "17:07:00", arrival_time = "17:07:00")
+
+View(trajet7B_12)
+
+trajet7B_13 <- trajet7B_1 %>% filter (stop_id!= 1797)
+
+base_trajet_7B <- rbind(trajet7B_0, trajet7B_12,trajet7B_13)
+
+base_trajet_7B <- base_trajet_7B %>% arrange ( direction_id, stop_sequence)
+
+```
+
+Metro 13 : même problème que la 7
+
+```{r}
+base_trajet_13 <- base_trajet_seq %>% 
+  filter (route_short_name ==13) %>% filter ((service_id != 2280400 | trip_headsign != 201) & (service_id != 2280400 | trip_headsign != 202) & (service_id != 2280405 | trip_headsign != 102))
+
+```
+
+Metro 10 : supprimer trip_short_name 104 (trip incomplet et boucle bizarre)
+
+```{r}
+base_trajet_10 <- base_trajet_seq %>% 
+  filter (route_short_name ==10, trip_short_name != 104)
+
+```
+
+Toutes les autres lignes sans problème :
+
+```{r}
+base_trajet_metro <- base_trajet_seq %>%
+  filter(route_type == 1, route_short_name != 7, route_short_name != 10, route_short_name != 13, route_short_name != "7B")
+
+```
+
+
+## base finale en sequences
+
+```{r}
+base_trajet_total <- rbind.data.frame(base_trajet_metro, base_trajet_rera, base_trajet_rerb, base_trajet_7, base_trajet_10, base_trajet_13, base_trajet_7B)
+
+```
+
+change en valeurs 
+
+```{r}
+library(forcats)
+base_trajet_total$route_short_name <- fct_relevel(base_trajet_total$route_short_name, c(1, 2, 3, "3B", 4, 5, 6, 7, "7B", 8, 9, 10, 11, 12, 13, 14, "A", "B"))
+
+
+base_trajet_total <- base_trajet_total %>%
+  arrange(route_short_name, direction_id, trip_headsign, stop_sequence)
+
+View(base_trajet_total)
+
+save_as_csv(base_trajet_total,"base_trajet_total.csv")
+
+```
+
+
+
+# DATASET TEMPS TRAJET
+
+création d'une table de données avec 3 colonnes:
+- from_stop_id (point de départ)
+- to_stop_id (point d'arrivée)
+- weight : temps de trajet entre from_stop_id et to_stop_id (en minutes)
+
+
+```{r}
+
+from_stop_id <- data_frame(base_trajet_total$stop_id)
+to_stop_id <- data_frame()
+
+
+for (j in 1:(nrow(from_stop_id)-1)){
+  if (base_trajet_total$stop_sequence[j+1] == (base_trajet_total$stop_sequence[j]+1)) {
+    to_stop_id <- rbind(to_stop_id, base_trajet_total$stop_id[j+1])}
+  else {
+    to_stop_id <- rbind(to_stop_id, NA)
+  }
+}
+
+to_stop_id <- rbind(to_stop_id, NA)
+
+
+weight <- data_frame()
+
+
+for (j in 1:(nrow(from_stop_id)-1)){
+  if (base_trajet_total$stop_sequence[j+1] == (base_trajet_total$stop_sequence[j]+1)) {
+    dat <- c(base_trajet_total$departure_time[j+1], base_trajet_total$arrival_time[j])
+    weight <- rbind(weight, dat[1]-dat[2])}
+  else {
+    weight <- rbind(weight, NA)
+  }
+}
+weight <- rbind(weight, NA)
+
+
+
+temps <- cbind(from_stop_id, to_stop_id, weight)
+colnames(temps) <- c("from_stop_id", "to_stop_id", "weight")
+temps <- na.omit(temps)
+
+View(temps)
+
+
+```
+
+On rajoute maintenant les retours (seuls problèmes, pour la ligne 7B et 10 il n'y a pas d'aller retour dans la loop)
+
+```{r}
+temps_retour <- temps
+
+colnames(temps_retour)[1] <- "to_stop_id"
+colnames(temps_retour)[2] <- "from_stop_id"
+
+temps <- rbind(temps, temps_retour)
+
+```
+
+On règle les problèmes de loop pour la 7B et la 10 en supprimant les chemins qui n'existent pas :
+
+
+```{r}
+
+temps <- temps %>% filter((from_stop_id !=2002 | to_stop_id != 1635) & (from_stop_id !=1635 | to_stop_id != 1756) & (from_stop_id !=1756 | to_stop_id != 1798) & (from_stop_id !=1798 | to_stop_id != 2002) & (from_stop_id != 2193 | to_stop_id != 2346) & (from_stop_id !=2346 | to_stop_id != 2354) & (from_stop_id !=2354 | to_stop_id != 2256) & (from_stop_id !=2256 | to_stop_id != 1903) & (from_stop_id != 2299 | to_stop_id != 1818) & (from_stop_id != 1818 | to_stop_id != 2026) & (from_stop_id !=2026 | to_stop_id != 1817) & (from_stop_id !=1817 | to_stop_id != 2004))
+
+```
+
+
+
+
+
+Ajout de la base de données Transfers, dupliquée en allers et retours
+Temps de correspondance à pied entre deux quais dans une même station
+
+```{r}
+transfers_test <- transfers %>% select (- transfer_type)
+
+colnames(transfers_test)[3] <- "weight"
+
+stop_id_metro  <- base_trajet_total$stop_id
+transfers_metro <- transfers_test[transfers_test$from_stop_id %in% stop_id_metro & transfers_test$to_stop_id %in% stop_id_metro, ]
+
+transfers_metro_retour <- transfers_metro
+
+colnames(transfers_metro_retour)[1] <- "to_stop_id"
+colnames(transfers_metro_retour)[2] <- "from_stop_id"
+
+transfers_total <- rbind(transfers_metro, transfers_metro_retour)
+
+transfers_total <- transfers_total%>%mutate(weight = round(weight/60))
+
+View(transfers_total)
+
+```
+
+Base finale temps_trajet comprenant :
+- les temps de trajet entre deux stations sur une même ligne (dans les deux sens)
+- les temps de correspondance entre deux quais dans une même station
+
+```{r}
+temps_trajet <- rbind(temps, transfers_total)
+temps_trajet <- unique(temps_trajet)
+
+View(temps_trajet)
+```
+
+
+```{r}
+save_as_csv(temps_trajet, "temps_trajet.csv")
+```
+
+
+
+# Table de correspondance stop_id / noms de stations
+
+```{r}
+nodes_trajet <- unique(base_trajet_total[, 1:2])
+
+View(nodes_trajet)
+
+```
+
+
+
+
