@@ -1,0 +1,65 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+## Carte sur ggplot des stations de métro 
+```{r}
+
+test_carte2 <- ggplot(data = stops) +
+  geom_point(aes(stop_lon, stop_lat, group = stop_id),
+            size = 0.5, alpha = .1) +
+  coord_equal() +
+  theme_map()
+```
+
+```{r}
+test_carte2
+```
+
+## Même carte sur leaflet 
+```{r}
+map <- leaflet() %>%
+  # Add CartoDB background map
+  addProviderTiles("CartoDB.DarkMatter") %>%  
+  # Add a marker for each stop
+  addCircleMarkers(lng= ~ stop_lon, lat= ~stop_lat, data = stops,
+                   stroke = FALSE, fillOpacity = 0.5, radius =5 ) 
+map  # Show the map
+```
+
+
+## Création de la map sur leafleat, avec uniquement les stations de métro, mais sans couleur 
+```{r}
+map_metro <- leaflet() %>%
+  # Add CartoDB background map
+  addProviderTiles("CartoDB.DarkMatter") %>%  
+  # Add a marker for each stop
+  addCircleMarkers(lng= ~ stop_lon, lat= ~stop_lat, data = base_metro_map,
+                   stroke = FALSE, fillOpacity = 0.5, radius =5 ) 
+map_metro  # Show the map
+```
+
+
+## Tout ce qui est nécéssaire pour ajouter des couleurs 
+```{r}
+base_metro_map$route_short_name = factor(base_metro_map$route_short_name)
+library(forcats)
+base_metro_map$route_short_name <- fct_relevel(base_metro_map$route_short_name, c(1, 2, 3, "3B", 4, 5, 6, 7, "7B", 8, 9, 10, 11, 12, 13, 14, "A", "B"))
+factpal=colorFactor(palette = c("#FFCD00", "#003CA6", "#837902", "#00AE41", "#CF009E", "#FF7E2E", "#6ECA97", "#FA9ABA", "#6ECA97", "#E19BDF", "#B6BD00", "#C9910D", "#704B1C", "#007852", "#6EC4E8", "#62259D", "#E2231A", "#7BA3DC"), 
+            domain = base_metro_map$route_short_name, levels = levels(base_metro_map$route_short_name), ordered = TRUE, na.color = "#808080", alpha = FALSE)
+```
+
+## Map avec les couleurs par stations en fonction de leur ligne 
+```{r}
+map_metro_color = leaflet() %>%
+  # Add CartoDB background map
+  addProviderTiles("CartoDB.DarkMatter") %>%  
+  # Add a marker for each stop
+  addCircleMarkers(lng= ~ stop_lon, lat= ~stop_lat, data = base_metro_map, stroke = FALSE, 
+                   fillOpacity = 0.5, radius =4, color = ~ factpal(route_short_name)) %>% 
+  addLegend(colors =c("#FFCD00", "#003CA6", "#837902", "#00AE41", "#CF009E", "#FF7E2E", "#6ECA97", "#FA9ABA", "#6ECA97", "#E19BDF", "#B6BD00", "#C9910D", "#704B1C", "#007852", "#6EC4E8", "#62259D", "#E2231A", "#7BA3DC"),
+            labels = levels(base_metro_map$route_short_name),title = "Metro line Paris")
+map_metro_color  # Show the map
+```
