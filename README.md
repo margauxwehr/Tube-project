@@ -1,3 +1,5 @@
+Project authors: Amélie Meurer, Mathilde Lavacquery, Margaux Wehr, Clément Ponsonnet
+All rights reserved
 
 (To simplify running of code, download ‘base_trajet_total.csv’ and ‘temps_trajet.csv’ directly  to avoid having to merge all the databases from scratch)
 
