@@ -1,0 +1,440 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+# CODE A INTEGRER SHINY
+
+
+files csv nécessaires (sur le drive):
+- base_trajet_total.csv (version d'Amélie avec les bons accents)
+- temps_trajet.csv
+
+
+```{r}
+library(igraph)
+library(dplyr)
+library(leaflet)
+library(forcats)
+
+temps_trajet <- read.csv2("Data/temps_trajet.csv")
+base_trajet_total <- read.csv2("Data/base_trajet_total.csv")
+
+
+#View(temps_trajet)
+
+
+```
+
+## inputs à rentrer dans le code
+
+inputs :
+- station de départ personne A - ici : "Pont de Neuilly"
+- station de départ personne B - ici : "Porte Maillot"
+
+
+
+```{r}
+# table de correspondance nom de stations/trip_id
+
+nodes_trajet <- base_trajet_total[, 1:2]
+nodes_trajet <- unique(nodes_trajet)
+
+temps_trajet_igraph <- graph_from_data_frame(d=temps_trajet, vertices = nodes_trajet, directed = T)
+
+trajet_plus_court <- shortest_paths(temps_trajet_igraph, V(temps_trajet_igraph)[stop_name =="Pont de Neuilly"], to = V(temps_trajet_igraph)[stop_name =="Miromesnil"], output = "vpath")
+
+
+#Ici vous avez le temps total de trajet : il faut encore l'input de l'utilisateur
+
+df_distances <- as.data.frame(distances(temps_trajet_igraph, V(temps_trajet_igraph)[stop_name == "Pont de Neuilly"], to = V(temps_trajet_igraph)[stop_name =="Miromesnil"]))
+
+
+inds = which(df_distances == min(df_distances), arr.ind=TRUE)
+n_colonne <- inds[1, 2] # IMPORTANT pour choisir les stations par la suite
+
+df_distances[inds[1,1], inds[1,2]]
+
+
+```
+
+
+
+## Calcul du mi-chemin
+
+output : station à mi-chemin
+
+
+```{r}
+
+# création de la table chemin pour lire le chemin le plus court
+
+pathlist_from <-c()
+for (i in 1:(length(V(temps_trajet_igraph)[trajet_plus_court$vpath[[n_colonne]]]$name)-1)){
+  pathlist_from[i] <- trajet_plus_court$vpath[[n_colonne]]$name[i]
+}
+
+pathlist_to <- c()
+for (i in 2:(length(V(temps_trajet_igraph)[trajet_plus_court$vpath[[n_colonne]]]$name))){
+  pathlist_to[i-1] <- trajet_plus_court$vpath[[n_colonne]]$name[i]
+}
+
+traj <-c()
+for (i in 1:(length(V(temps_trajet_igraph)[trajet_plus_court$vpath[[n_colonne]]]$name)-1)){
+  traj[i] <- (temps_trajet %>% filter(from_stop_id == trajet_plus_court$vpath[[n_colonne]]$name[i], to_stop_id == trajet_plus_court$vpath[[n_colonne]]$name[i+1]))$weight[1]
+}
+
+#traj <- is.numeric(as.character(traj))
+
+chemin <- cbind(pathlist_from,pathlist_to,traj)
+chemin <- as.data.frame(chemin)
+chemin$traj <- as.numeric(chemin$traj)
+
+# cumsum des temps de trajet
+
+chemin <- chemin %>% transform(Total = ave(traj, FUN = cumsum))
+
+#mi-chemin
+
+mid <- max(chemin$Total)/2
+mid
+
+output <- (chemin %>% filter(Total > mid ))$pathlist_to[1]
+output
+
+
+```
+
+
+```{r}
+
+V(temps_trajet_igraph)[trajet_plus_court$vpath[[n_colonne]]]$name
+
+
+```
+
+
+
+
+
+
+## Visualisation :
+
+output: visualisation du trajet entre A et B
+
+
+Pour faire la visualisation 
+```{r}
+### A MODIFIER !!!!!!!!!!!!!!
+
+base_trajet_court <- base_trajet_total %>% filter (stop_id %in% V(temps_trajet_igraph)[trajet_plus_court$vpath[[n_colonne]]]$name) %>% slice(match(V(temps_trajet_igraph)[trajet_plus_court$vpath[[n_colonne]]]$name, stop_id))
+
+View(base_trajet_court)
+
+```
+
+Ici la visualisation ! 
+
+```{r}
+
+base_metro_map <- base_trajet_total %>%
+  distinct(stop_name, route_short_name, .keep_all = TRUE)
+
+base_metro_map$route_short_name = factor(base_metro_map$route_short_name)
+
+
+## A RAJOUTER LIGNE DU DESSOUS (désolée oubli de ma part) !!!!!!!!!!
+base_metro_map$route_short_name <- fct_relevel(base_metro_map$route_short_name, c(1, 2, 3, "3B", 4, 5, 6, 7, "7B", 8, 9, 10, 11, 12, 13, 14, "A", "B"))
+
+
+base_trajet_total$route_short_name = factor(base_trajet_total$route_short_name)
+
+
+
+## CELLE-LA AUSSI !!!!!!!!!!!!!!!
+base_trajet_total$route_short_name <- fct_relevel(base_trajet_total$route_short_name, c(1, 2, 3, "3B", 4, 5, 6, 7, "7B", 8, 9, 10, 11, 12, 13, 14, "A", "B"))
+
+
+
+factpal=colorFactor(palette = c("#FFCD00", "#003CA6", "#837902", "#00AE41", "#CF009E", "#FF7E2E", "#6ECA97", "#FA9ABA", "#6ECA97", "#E19BDF", "#B6BD00", "#C9910D", "#704B1C", "#007852", "#6EC4E8", "#62259D", "#E2231A", "#7BA3DC"), 
+            domain = base_metro_map$route_short_name, levels = levels(base_metro_map$route_short_name), ordered = TRUE, na.color = "#808080", alpha = FALSE)
+
+
+map_metro_ligne = leaflet() %>%
+  # Add CartoDB background map
+  addProviderTiles("CartoDB.DarkMatter") %>%  
+  # Add a marker for each stop
+    addMarkers(lng = base_trajet_court$stop_lon[1], lat = base_trajet_court$stop_lat[1], data= base_trajet_court, popup = "Départ User 1")%>%
+  addMarkers(lng = base_trajet1$stop_lon[dim(base_trajet1)[1]], lat = base_trajet1$stop_lat[dim(base_trajet1)[1]], data= base_trajet_court, popup = "Point de retrouvailles")%>%
+   addMarkers(lng = base_trajet_court$stop_lon[dim(base_trajet_court)[1]], lat = base_trajet_court$stop_lat[dim(base_trajet_court)[1]], data= base_trajet_court, popup = "Départ user 2")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet_court %>% filter(route_short_name== 1, direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#FFCD00")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet_court %>% filter(route_short_name== 2, direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#003CA6")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet_court %>% filter(route_short_name== 3, direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#837902")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet_court %>% filter(route_short_name== "3B", direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#00AE41")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet_court %>% filter(route_short_name== 4, direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#CF009E")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet_court %>% filter(route_short_name== 5, direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#FF7E2E")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet_court %>% filter(route_short_name== 6, direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#6ECA97")%>%
+    addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet_court %>% filter(route_short_name== 7, trip_short_name ==101), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#FA9ABA")%>%
+    addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet_court %>% filter(route_short_name== 7, trip_short_name ==201), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#FA9ABA")%>%
+      addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet_court %>% filter(route_short_name== "7B", trip_short_name ==101), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#6ECA97")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet_court %>% filter(route_short_name== "7B", trip_short_name ==201), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#6ECA97")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet_court %>% filter(route_short_name== 8, direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#E19BDF")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet_court %>% filter(route_short_name== 9, direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#B6BD00")%>%
+    addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet_court %>% filter(route_short_name== 10), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#C9910D")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet_court %>% filter(route_short_name== 11, direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#704B1C")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet_court %>% filter(route_short_name== 12, direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#007852")%>%
+    addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet_court %>% filter(route_short_name== 13, trip_short_name ==101), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#6EC4E8")%>%
+    addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet_court %>% filter(route_short_name== 13, trip_short_name ==102), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#6EC4E8")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet_court %>% filter(route_short_name== 14, direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#62259D")%>%
+    addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet_court %>% filter(route_short_name== "A", trip_headsign == "NELY"), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#E2231A")%>%
+    addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet_court %>% filter(route_short_name== "A", trip_headsign == "QIKY"), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#E2231A")%>%
+      addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet_court %>% filter(route_short_name== "B", trip_headsign == "SOIR"), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#7BA3DC")%>%
+    addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet_court %>% filter(route_short_name== "B", trip_headsign == "KOCQ"), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#7BA3DC")%>%
+
+  addCircleMarkers(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet_court, stroke = FALSE, 
+                  fillOpacity = 0.5, radius =4, color = ~ factpal(route_short_name)) %>% 
+  addLegend(colors =c("#FFCD00", "#003CA6", "#837902", "#00AE41", "#CF009E", "#FF7E2E", "#6ECA97", "#FA9ABA", "#6ECA97", "#E19BDF", "#B6BD00", "#C9910D", "#704B1C", "#007852", "#6EC4E8", "#62259D", "#E2231A", "#7BA3DC"),
+            labels = levels(base_trajet_total$route_short_name),title = "Metro line Paris")
+map_metro_ligne  # Show the map
+```
+
+
+
+## VISUALISATION 1 :
+
+
+
+```{r}
+# retourne une liste des stops_id du chemin_1 (dans l'ordre)
+
+chemin_1 <- (chemin %>% filter(Total <= mid))$pathlist_from
+
+base_trajet1 <- base_trajet_total %>% filter (stop_id %in% chemin_1) %>% slice(match(chemin_1, stop_id))
+
+
+map_metro_ligne1 = leaflet() %>%
+  # Add CartoDB background map
+  addProviderTiles("CartoDB.DarkMatter") %>%  
+  # Add a marker for each stop
+    addMarkers(lng = base_trajet1$stop_lon[1], lat = base_trajet1$stop_lat[1], data= base_trajet1, popup = "Départ User 1")%>%
+   addMarkers(lng = base_trajet1$stop_lon[dim(base_trajet1)[1]], lat = base_trajet1$stop_lat[dim(base_trajet1)[1]], data= base_trajet1, popup = "Départ user 2")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet1 %>% filter(route_short_name== 1, direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#FFCD00")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet1 %>% filter(route_short_name== 2, direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#003CA6")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet1 %>% filter(route_short_name== 3, direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#837902")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet1 %>% filter(route_short_name== "3B", direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#00AE41")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet1 %>% filter(route_short_name== 4, direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#CF009E")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet1 %>% filter(route_short_name== 5, direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#FF7E2E")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet1 %>% filter(route_short_name== 6, direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#6ECA97")%>%
+    addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet1 %>% filter(route_short_name== 7, trip_short_name ==101), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#FA9ABA")%>%
+    addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet1 %>% filter(route_short_name== 7, trip_short_name ==201), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#FA9ABA")%>%
+      addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet1 %>% filter(route_short_name== "7B", trip_short_name ==101), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#6ECA97")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet1 %>% filter(route_short_name== "7B", trip_short_name ==201), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#6ECA97")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet1 %>% filter(route_short_name== 8, direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#E19BDF")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet1 %>% filter(route_short_name== 9, direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#B6BD00")%>%
+    addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet1 %>% filter(route_short_name== 10), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#C9910D")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet1 %>% filter(route_short_name== 11, direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#704B1C")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet1 %>% filter(route_short_name== 12, direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#007852")%>%
+    addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet1 %>% filter(route_short_name== 13, trip_short_name ==101), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#6EC4E8")%>%
+    addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet1 %>% filter(route_short_name== 13, trip_short_name ==102), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#6EC4E8")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet1 %>% filter(route_short_name== 14, direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#62259D")%>%
+    addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet1 %>% filter(route_short_name== "A", trip_headsign == "NELY"), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#E2231A")%>%
+    addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet1 %>% filter(route_short_name== "A", trip_headsign == "QIKY"), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#E2231A")%>%
+      addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet1 %>% filter(route_short_name== "B", trip_headsign == "SOIR"), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#7BA3DC")%>%
+    addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet1 %>% filter(route_short_name== "B", trip_headsign == "KOCQ"), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#7BA3DC")%>%
+
+  addCircleMarkers(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet1, stroke = FALSE, 
+                  fillOpacity = 0.5, radius =4, color = ~ factpal(route_short_name)) %>% 
+  addLegend(colors =c("#FFCD00", "#003CA6", "#837902", "#00AE41", "#CF009E", "#FF7E2E", "#6ECA97", "#FA9ABA", "#6ECA97", "#E19BDF", "#B6BD00", "#C9910D", "#704B1C", "#007852", "#6EC4E8", "#62259D", "#E2231A", "#7BA3DC"),
+            labels = levels(base_trajet_total$route_short_name),title = "Metro line Paris")
+map_metro_ligne1  # Show the map
+
+
+
+
+```
+
+
+
+## Visualisation 2:
+
+
+```{r}
+
+# liste des stop
+
+chemin_2 <- rev((chemin %>% filter( Total > mid))$pathlist_to) # Attention, pas même que 1
+
+
+base_trajet2 <- base_trajet_total %>% filter (stop_id %in% chemin_2) %>% slice(match(chemin_2, stop_id))
+
+View(base_trajet2)
+
+
+
+map_metro_ligne2 = leaflet() %>%
+  # Add CartoDB background map
+  addProviderTiles("CartoDB.DarkMatter") %>%  
+  # Add a marker for each stop
+    addMarkers(lng = base_trajet2$stop_lon[1], lat = base_trajet2$stop_lat[1], data= base_trajet2, popup = "Départ User 1")%>%
+   addMarkers(lng = base_trajet2$stop_lon[dim(base_trajet2)[1]], lat = base_trajet2$stop_lat[dim(base_trajet2)[1]], data= base_trajet2, popup = "Départ user 2")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet2 %>% filter(route_short_name== 1, direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#FFCD00")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet2 %>% filter(route_short_name== 2, direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#003CA6")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet2 %>% filter(route_short_name== 3, direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#837902")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet2 %>% filter(route_short_name== "3B", direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#00AE41")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet2 %>% filter(route_short_name== 4, direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#CF009E")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet2 %>% filter(route_short_name== 5, direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#FF7E2E")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet2 %>% filter(route_short_name== 6, direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#6ECA97")%>%
+    addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet2 %>% filter(route_short_name== 7, trip_short_name ==101), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#FA9ABA")%>%
+    addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet2 %>% filter(route_short_name== 7, trip_short_name ==201), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#FA9ABA")%>%
+      addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet2 %>% filter(route_short_name== "7B", trip_short_name ==101), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#6ECA97")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet2 %>% filter(route_short_name== "7B", trip_short_name ==201), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#6ECA97")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet2 %>% filter(route_short_name== 8, direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#E19BDF")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet2 %>% filter(route_short_name== 9, direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#B6BD00")%>%
+    addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet2 %>% filter(route_short_name== 10), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#C9910D")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet2 %>% filter(route_short_name== 11, direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#704B1C")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet2 %>% filter(route_short_name== 12, direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#007852")%>%
+    addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet2 %>% filter(route_short_name== 13, trip_short_name ==101), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#6EC4E8")%>%
+    addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet2 %>% filter(route_short_name== 13, trip_short_name ==102), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#6EC4E8")%>%
+  addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet2 %>% filter(route_short_name== 14, direction_id ==0), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#62259D")%>%
+    addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet2 %>% filter(route_short_name== "A", trip_headsign == "NELY"), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#E2231A")%>%
+    addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet2 %>% filter(route_short_name== "A", trip_headsign == "QIKY"), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#E2231A")%>%
+      addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet2 %>% filter(route_short_name== "B", trip_headsign == "SOIR"), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#7BA3DC")%>%
+    addPolylines(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet2 %>% filter(route_short_name== "B", trip_headsign == "KOCQ"), group = ~ route_id, weight = 2,  fillOpacity = 0.5, color = "#7BA3DC")%>%
+
+  addCircleMarkers(lng= ~ stop_lon, lat= ~stop_lat, data = base_trajet2, stroke = FALSE, 
+                  fillOpacity = 0.5, radius =4, color = ~ factpal(route_short_name)) %>% 
+  addLegend(colors =c("#FFCD00", "#003CA6", "#837902", "#00AE41", "#CF009E", "#FF7E2E", "#6ECA97", "#FA9ABA", "#6ECA97", "#E19BDF", "#B6BD00", "#C9910D", "#704B1C", "#007852", "#6EC4E8", "#62259D", "#E2231A", "#7BA3DC"),
+            labels = levels(base_trajet_total$route_short_name),title = "Metro line Paris")
+map_metro_ligne2 # Show the map
+
+
+
+
+
+```
+
+
+
+
+
+
+```{r}
+
+base_trajet_court <- base_trajet_total %>% filter (stop_id %in% V(temps_trajet_igraph)[trajet_plus_court$vpath[[n_colonne]]]$name) %>% slice(match(V(temps_trajet_igraph)[trajet_plus_court$vpath[[n_colonne]]]$name, stop_id))
+
+View(base_trajet_court)
+
+
+
+
+
+chemin_1 <- (chemin %>% filter(Total <= mid))$from_stop_id
+
+base_trajet1 <- base_trajet_total %>% filter (stop_id %in% chemin_1) %>% slice(match(chemin_1, stop_id))
+
+chemin_2 <- rev((chemin %>% filter( Total > mid))$to_stop_id) # Attention, pas même que 1
+base_trajet2 <- base_trajet_total %>% filter (stop_id %in% chemin_2) %>% slice(match(chemin_2, stop_id))
+
+View(base_trajet2)
+
+chemin_1
+chemin_2
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+## AUTRES OUTPUT :
+
+Le nom des stations les unes à la suite des autres (peut vous servir)
+```{r}
+paths <- trajet_plus_court$vpath # tous les paths 
+paths <- paths[n_colonne] # le path le plus court 
+names <- V(temps_trajet_igraph)$stop_name
+lapply(paths, function(x) { names[x] })
+```
+
+Donne l'ordre des stations 
+```{r}
+V(temps_trajet_igraph)[trajet_plus_court$vpath[[n_colonne]]]$name
+```
+
+
+
+
+
+
+```{r}
+pathlist_from <-c()
+for (i in 1:(length(V(temps_trajet_igraph)[trajet_plus_court$vpath[[n_colonne]]]$name)-1)){
+  pathlist_from[i] <- trajet_plus_court$vpath[[n_colonne]]$name[i]
+}
+
+pathlist_to <- c()
+for (i in 2:(length(V(temps_trajet_igraph)[trajet_plus_court$vpath[[n_colonne]]]$name))){
+  pathlist_to[i-1] <- trajet_plus_court$vpath[[n_colonne]]$name[i]
+}
+
+traj <-c()
+for (i in 1:(length(V(temps_trajet_igraph)[trajet_plus_court$vpath[[n_colonne]]]$name)-1)){
+  traj[i] <- (temps_trajet %>% filter(from_stop_id == trajet_plus_court$vpath[[n_colonne]]$name[i], to_stop_id == trajet_plus_court$vpath[[n_colonne]]$name[i+1]))$weight[1]
+}
+
+#traj <- is.numeric(as.character(traj))
+
+chemin <- cbind(pathlist_from,pathlist_to,traj)
+chemin <- as.data.frame(chemin)
+chemin$traj <- as.numeric(chemin$traj)
+
+# cumsum des temps de trajet
+
+chemin <- chemin %>% transform(Total = ave(traj, FUN = cumsum))
+
+View(chemin)
+
+#mi-chemin
+
+mid <- max(chemin$Total)/2
+mid
+
+output <- (chemin %>% filter(Total > mid ))$pathlist_to[1]
+output
+
+
+c1 <- (chemin %>% filter(Total <= mid))$pathlist_from
+c1 <- as.numeric(c1)
+c1
+c2 <- (chemin %>% filter(Total <= mid))$pathlist_to
+c2 <- as.numeric(as.factor(c1))
+
+
+
+chemin_1 <- unique(c(c1,c2))
+chemin_1
+
+base_trajet1 <- base_trajet_total %>% filter (stop_id %in% chemin_1) %>% slice(match(chemin_1, stop_id))
+
+
+
+chemin_2 <- rev((chemin %>% filter( Total > mid))$pathlist_to) # Attention, pas même que 1
+base_trajet2 <- base_trajet_total %>% filter (stop_id %in% chemin_2) %>% slice(match(chemin_2, stop_id))
+
+View(base_trajet1)
+
+View(base_trajet2)
+
+
+```
+
+
