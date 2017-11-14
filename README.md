@@ -1,7 +1,7 @@
 Project authors: Amélie Meurer, Mathilde Lavacquery, Margaux Wehr, Clément Ponsonnet.
 All rights reserved
 
-(To simplify running of code, download ‘base_trajet_total.csv’ and ‘temps_trajet.csv’ directly  to avoid having to merge all the databases from scratch)
+(To simplify running of code, download the entire file to avoid having to merge all the databases from scratch)
 
 The aim of the project was to find the optimal mid-way for two users in a city to meet using Djikstra algorithm. A visualisation tool depicting the mi-way and meeting point suggestions (café, bar, restaurant) was integrated into
  a Shiny App. This optimal mid-way was computed based on data taken from the public Paris metro station dataset (‘Open RATP’ website). The scope of the dataset was limited to metro and suburban train (RER), excluding buses. 
