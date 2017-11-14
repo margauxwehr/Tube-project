@@ -1,20 +1,10 @@
-# RATP General project methodology
-
+Project methodology
 
 Guidelines:
 To simplify running of code, download ‘base_trajet_total.csv’ and ‘temps_trajet.csv’ directly  to avoid having to merge all the databases from scratch
 
-Keywords : Djisktra, metro, Shiny
-
-I/ Aim of project
-
 The aim of the project was to find the optimal mid-way for two users in a city to meet using Djikstra algorithm. A visualisation tool depicting the mi-way and meeting point suggestions (café, bar, restaurant) was integrated into
  a Shiny App. This optimal mid-way was computed based on data taken from the public Paris metro station dataset (‘Open RATP’ website). The scope of the dataset was limited to metro and suburban train (RER), excluding buses. 
-
-For example, if a person is at ‘Bastille’ tube stop and the other at ‘Champs Elysées Clémenceau’, the app would find the optimal tube mid-way and geographical coordinates. the Shiny App displays café, bar and restaurant recommendations at this mid-way.
-
-
-II/ Methodology
 
 Datasets were taken from the following website:
 https://data.ratp.fr/explore/dataset/offre-transport-de-la-ratp-format-gtfs/
